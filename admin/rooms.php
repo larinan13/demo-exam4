@@ -69,10 +69,18 @@ $amenities  = $pdo->query("SELECT * FROM amenities ORDER BY id")->fetchAll();
 <div class="container mt-4">
     <div class="d-flex justify-content-between mb-4">
         <h2>Управление номерами</h2>
-        <div>
-            <a href="/admin/bookings.php" class="btn btn-secondary">Заявки</a>
-            <a href="/admin/logout.php" class="btn btn-outline-danger">Выйти</a>
-        </div>
+        <div class="d-flex gap-2">
+    <a href="/index.php" class="btn btn-outline-success" target="_blank">
+        🌐 На сайт
+    </a>
+    <?php if (basename($_SERVER['PHP_SELF']) !== 'bookings.php'): ?>
+        <a href="/admin/bookings.php" class="btn btn-secondary">Заявки</a>
+    <?php endif; ?>
+    <?php if (basename($_SERVER['PHP_SELF']) !== 'rooms.php'): ?>
+        <a href="/admin/rooms.php" class="btn btn-secondary">Номера</a>
+    <?php endif; ?>
+    <a href="/admin/logout.php" class="btn btn-outline-danger">Выйти</a>
+</div>
     </div>
 
     <?php if ($message): ?><div class="alert alert-info"><?= htmlspecialchars($message) ?></div><?php endif; ?>
