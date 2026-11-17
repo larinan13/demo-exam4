@@ -56,29 +56,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors['email'] = 'Некорректный email';
     }
 
-    // Валидация дат
-    $parseDate = function($s) {
-        if (!preg_match('/^\d{2}\.\d{2}\.\d{4}$/', $s)) return null;
-        $d = DateTime::createFromFormat('d.m.Y', $s);
-        return ($d && $d->format('d.m.Y') === $s) ? $d : null;
-    };
+    // Валидация дат (формат YYYY-MM-DD от input type="date")
+$parseDate = function($s) {
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $s)) return null;
+    $d = DateTime::createFromFormat('Y-m-d', $s);
+    return ($d && $d->format('Y-m-d') === $s) ? $d : null;
+};
 
-    $dIn  = $parseDate($checkIn);
-    $dOut = $parseDate($checkOut);
+$dIn  = $parseDate($checkIn);
+$dOut = $parseDate($checkOut);
 
-    if (!$dIn)  $errors['check_in']  = 'Дата заезда должна быть в формате ДД.ММ.ГГГГ';
-    if (!$dOut) $errors['check_out'] = 'Дата выезда должна быть в формате ДД.ММ.ГГГГ';
+if (!$dIn)  $errors['check_in']  = 'Выберите корректную дату заезда';
+if (!$dOut) $errors['check_out'] = 'Выберите корректную дату выезда';
 
-    if ($dIn && $dOut && $dOut <= $dIn) {
-        $errors['check_out'] = 'Дата выезда должна быть позже даты заезда';
+if ($dIn && $dOut && $dOut <= $dIn) {
+    $errors['check_out'] = 'Дата выезда должна быть позже даты заезда';
+}
+if ($dIn && $dIn < new DateTime('today')) {
+    $errors['check_in'] = 'Дата заезда не может быть в прошлом';
+}
+
+// Пересечение с одобренными бронями
+if ($dIn && $dOut && !$errors) {
+    $stmt = $pdo->prepare("
+        SELECT id, check_in, check_out 
+        FROM bookings 
+        WHERE room_id = ? 
+          AND status = 'approved'
+          AND (
+            (check_in < ? AND check_out > ?) OR
+            (check_in < ? AND check_out > ?) OR
+            (check_in >= ? AND check_out <= ?)
+          )
+    ");
+    $stmt->execute([
+        $roomId,
+        $dIn->format('Y-m-d'), $dIn->format('Y-m-d'),  // новый заезд внутри существующего
+        $dOut->format('Y-m-d'), $dOut->format('Y-m-d'), // новый выезд внутри существующего
+        $dIn->format('Y-m-d'), $dOut->format('Y-m-d')   // новый период полностью внутри
+    ]);
+    
+    if ($stmt->fetch()) {
+        $errors['dates'] = 'Выбранный период уже забронирован. Пожалуйста, выберите другие даты.';
     }
-    if ($dIn && $dIn < new DateTime('today')) {
-        $errors['check_in'] = 'Дата заезда не может быть в прошлом';
-    }
-
-    if (!$room) {
-        $errors['room'] = 'Выбранный номер не найден';
-    }
+}
+    
+    
 
     // Если ошибок нет — сохраняем заявку
     if (!$errors && $room) {
@@ -101,6 +124,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 include __DIR__ . '/includes/header.php';
 ?>
+
+
 
 <h2 class="my-4">Бронирование номера</h2>
 
@@ -191,15 +216,26 @@ include __DIR__ . '/includes/header.php';
                         </div>
 
                         <div class="col-md-6">
-                            <label class="form-label">Дата заезда (ДД.ММ.ГГГГ) *</label>
-                            <input type="text" name="check_in" class="form-control" placeholder="17.11.2026"
-                                   value="<?= htmlspecialchars($old['check_in'] ?? '') ?>" required>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label">Дата выезда (ДД.ММ.ГГГГ) *</label>
-                            <input type="text" name="check_out" class="form-control" placeholder="20.11.2026"
-                                   value="<?= htmlspecialchars($old['check_out'] ?? '') ?>" required>
-                        </div>
+    <label class="form-label">Дата заезда *</label>
+    <input type="date" name="check_in" class="form-control"
+           value="<?= htmlspecialchars($old['check_in'] ?? '') ?>"
+           min="<?= date('Y-m-d') ?>"
+           id="check_in"
+           required>
+    <?php if (isset($errors['check_in'])): ?>
+        <div class="invalid-feedback d-block"><?= htmlspecialchars($errors['check_in']) ?></div>
+    <?php endif; ?>
+</div>
+<div class="col-md-6">
+    <label class="form-label">Дата выезда *</label>
+    <input type="date" name="check_out" class="form-control"
+           value="<?= htmlspecialchars($old['check_out'] ?? '') ?>"
+           id="check_out"
+           required>
+    <?php if (isset($errors['check_out'])): ?>
+        <div class="invalid-feedback d-block"><?= htmlspecialchars($errors['check_out']) ?></div>
+    <?php endif; ?>
+</div>
 
                         <div class="col-12 mt-4">
                             <button type="submit" class="btn btn-success btn-lg w-100">Отправить заявку</button>
@@ -208,6 +244,57 @@ include __DIR__ . '/includes/header.php';
                 </form>
             </div>
         </div>
+	<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const checkIn = document.getElementById('check_in');
+    const checkOut = document.getElementById('check_out');
+    
+    // При изменении даты заезда — обновляем минимальную дату выезда
+    checkIn.addEventListener('change', function() {
+        if (this.value) {
+            const nextDay = new Date(this.value);
+            nextDay.setDate(nextDay.getDate() + 1);
+            const yyyy = nextDay.getFullYear();
+            const mm = String(nextDay.getMonth() + 1).padStart(2, '0');
+            const dd = String(nextDay.getDate()).padStart(2, '0');
+            checkOut.min = `${yyyy}-${mm}-${dd}`;
+            
+            // Если дата выезда раньше новой минимальной — сбрасываем
+            if (checkOut.value && checkOut.value <= this.value) {
+                checkOut.value = '';
+            }
+        }
+    });
+});
+// Проверка доступности дат
+function checkAvailability() {
+    const roomId = document.querySelector('input[name="room_id"]').value;
+    const checkIn = document.querySelector('input[name="check_in"]').value;
+    const checkOut = document.querySelector('input[name="check_out"]').value;
+    
+    if (checkIn && checkOut) {
+        fetch(`/check_availability.php?room_id=${roomId}&check_in=${encodeURIComponent(checkIn)}&check_out=${encodeURIComponent(checkOut)}`)
+            .then(r => r.json())
+            .then(data => {
+                const alert = document.getElementById('date-availability-alert');
+                if (!data.available) {
+                    if (!alert) {
+                        const div = document.createElement('div');
+                        div.id = 'date-availability-alert';
+                        div.className = 'alert alert-warning mt-2';
+                        div.textContent = '⚠️ Этот период уже забронирован. Выберите другие даты.';
+                        document.querySelector('button[type="submit"]').before(div);
+                    }
+                } else if (alert) {
+                    alert.remove();
+                }
+            });
+    }
+}
+
+document.querySelector('input[name="check_in"]').addEventListener('change', checkAvailability);
+document.querySelector('input[name="check_out"]').addEventListener('change', checkAvailability);
+</script>
     <?php endif; ?>
 <?php endif; ?>
 
