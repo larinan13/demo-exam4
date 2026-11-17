@@ -41,7 +41,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <input type="password" name="password" class="form-control" required>
         </div>
         <button class="btn btn-success w-100">Войти</button>
-    </form>
+</form>
+<div class="text-center mt-3">
+    <a href="/index.php" class="text-decoration-none">← Вернуться на главную</a>
+</div>
+
     <p class="mt-3 text-center small text-muted"> hotel123 / adminHotel </p>
 </div>
 </body>
